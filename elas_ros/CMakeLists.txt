@@ -17,10 +17,17 @@ find_package(catkin REQUIRED COMPONENTS
   pcl_conversions
   geometry_msgs
   message_generation
+  image_proc
+  dynamic_reconfigure
+)
+
+generate_dynamic_reconfigure_options(
+  ./cfg/dynamicParam.cfg
+  # 如果有其他的.cfg文件，也在这里列出
 )
 
 find_package(OpenCV REQUIRED)
-find_package(Boost REQUIRED COMPONENTS signals)
+find_package(Boost REQUIRED )
 
 add_message_files( DIRECTORY msg FILES ElasFrameData.msg)
 
@@ -32,13 +39,19 @@ generate_messages(
 
 add_definitions(-msse3)
 
-include_directories(src ${libelas_INCLUDE_DIRS} ${catkin_INCLUDE_DIRS})
+include_directories(src ${libelas_INCLUDE_DIRS} ${catkin_INCLUDE_DIRS} ${CATKIN_DEVEL_PREFIX}/include)
+
+
+message(" ${CATKIN_DEVEL_PREFIX}/include")
+
+
+
 include_directories(${Boost_INCLUDE_DIRS})
 
 add_executable(elas_ros src/elas.cpp)
 
 add_dependencies(elas_ros ${catkin_EXPORTED_TARGETS})
-add_dependencies(elas_ros ${PROJECT_NAME}_gencpp)
+add_dependencies(elas_ros ${PROJECT_NAME}_gencpp ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS} ${PROJECT_NAME}_gencfg)
 
 add_executable(pc_construction src/pc_construction.cpp)
 add_dependencies(pc_construction ${PROJECT_NAME}_gencpp)

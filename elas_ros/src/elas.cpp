@@ -36,22 +36,33 @@
 #include <image_transport/subscriber_filter.h>
 
 #include <image_geometry/stereo_camera_model.h>
-
+#include <boost/signals2.hpp>
 #include <cv_bridge/cv_bridge.h>
 
 #include <pcl_ros/point_cloud.h>
+#include <pcl_ros/publisher.h>
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 
 #include <elas_ros/ElasFrameData.h>
 
 #include <libelas/elas.h>
+#include <image_proc/processor.h>
+#include <sensor_msgs/image_encodings.h>
+#include <ros/console.h>
 
-//#define DOWN_SAMPLE
+#include <elas_ros/dynamicParamConfig.h>
+#include <dynamic_reconfigure/server.h>
+#define DOWN_SAMPLE
+
+
 
 class Elas_Proc
 {
 public:
+
+  
+
   Elas_Proc(const std::string &transport)
   {
     ros::NodeHandle local_nh("~");
@@ -80,13 +91,26 @@ public:
     local_nh.param<bool>("filter_adaptive_mean", filter_adaptive_mean, 1);
     local_nh.param<bool>("postprocess_only_left", postprocess_only_left, 1);
     local_nh.param<bool>("subsampling", subsampling, 0);
-
+    
+    
     // Topics
-    std::string stereo_ns = nh.resolveName("stereo");
-    std::string left_topic = ros::names::clean(stereo_ns + "/left/" + nh.resolveName("image"));
-    std::string right_topic = ros::names::clean(stereo_ns + "/right/" + nh.resolveName("image"));
-    std::string left_info_topic = stereo_ns + "/left/camera_info";
-    std::string right_info_topic = stereo_ns + "/right/camera_info";
+    //  
+    local_nh.param<std::string>("cam_frame", this->cam_frame, "cam_pos");
+    std::string left_topic ;
+    std::string right_topic ;
+    std::string left_info_topic ;
+    std::string right_info_topic ;
+    local_nh.param<std::string>("image_0", left_topic, "/cam0/image_rect");
+    local_nh.param<std::string>("image_1", right_topic, "/cam1/image_rect");    
+    local_nh.param<std::string>("image_info_0", left_info_topic, "/cam0/camera_info");
+    local_nh.param<std::string>("image_info_1", right_info_topic, "/cam1/camera_info");
+
+
+    ROS_WARN("This is a warning message",left_topic,left_info_topic);
+
+    
+    dynamic_reconfigure::Server<elas_ros::dynamicParamConfig>::CallbackType f= boost::bind(&Elas_Proc::callback__, this, _1, _2);
+    this->server.setCallback(f);
 
     image_transport::ImageTransport it(nh);
     left_sub_.subscribe(it, left_topic, 1, transport);
@@ -100,7 +124,7 @@ public:
 
     disp_pub_.reset(new Publisher(local_it.advertise("image_disparity", 1)));
     depth_pub_.reset(new Publisher(local_it.advertise("depth", 1)));
-    pc_pub_.reset(new ros::Publisher(local_nh.advertise<PointCloud>("point_cloud", 1)));
+    pc_pub_.reset(new pcl_ros::Publisher<pcl::PointXYZRGB>(local_nh,"point_cloud", 1));
     elas_fd_pub_.reset(new ros::Publisher(local_nh.advertise<elas_ros::ElasFrameData>("frame_data", 1)));
 
     pub_disparity_ = local_nh.advertise<stereo_msgs::DisparityImage>("disparity", 1);
@@ -159,7 +183,41 @@ public:
 #endif
     elas_.reset(new Elas(*param));
   }
+  void callback__(elas_ros::dynamicParamConfig &config, uint32_t level) {
 
+    param.reset(new Elas::parameters);
+
+    /* Parameters tunned*/
+    param->disp_min = config.disp_min;
+    param->disp_max = config.disp_max;
+    param->support_threshold = config.support_threshold;
+    param->support_texture = config.support_texture;
+    param->candidate_stepsize = config.candidate_stepsize;
+    param->incon_window_size = config.incon_window_size;
+    param->incon_threshold = config.incon_threshold;
+    param->incon_min_support = config.incon_min_support;
+    param->add_corners = config.add_corners;
+    param->grid_size = config.grid_size;
+    param->beta = config.beta;
+    param->gamma = config.gamma;
+    param->sigma = config.sigma;
+    param->sradius = config.sradius;
+    param->match_texture = config.match_texture;
+    param->lr_threshold = config.lr_threshold;
+    param->speckle_sim_threshold = config.speckle_sim_threshold;
+    param->speckle_size = config.speckle_size;
+    param->ipol_gap_width = config.ipol_gap_width;
+    param->filter_median = config.filter_median;
+    param->filter_adaptive_mean = config.filter_adaptive_mean;
+    param->postprocess_only_left = config.postprocess_only_left;
+    param->subsampling = config.subsampling;
+
+    
+#ifdef DOWN_SAMPLE
+    param->subsampling = true;
+#endif
+    elas_.reset(new Elas(*param));
+}
   typedef image_transport::SubscriberFilter Subscriber;
   typedef message_filters::Subscriber<sensor_msgs::CameraInfo> InfoSubscriber;
   typedef image_transport::Publisher Publisher;
@@ -184,14 +242,14 @@ public:
       pcl::PCLHeader l_info_header = pcl_conversions::toPCL(l_info_msg->header);
 
       PointCloud::Ptr point_cloud(new PointCloud());
-      point_cloud->header.frame_id = l_info_header.frame_id;
+      point_cloud->header.frame_id = this->cam_frame;
       point_cloud->header.stamp = l_info_header.stamp;
       point_cloud->width = 1;
       point_cloud->height = inliers.size();
       point_cloud->points.resize(inliers.size());
 
       elas_ros::ElasFrameData data;
-      data.header.frame_id = l_info_msg->header.frame_id;
+      data.header.frame_id = this->cam_frame;
       data.header.stamp = l_info_msg->header.stamp;
       data.width = l_width;
       data.height = l_height;
@@ -248,7 +306,7 @@ public:
         data.z[index] = point.z;
       }
 
-      pc_pub_->publish(point_cloud);
+      pc_pub_->publish(*point_cloud);
       elas_fd_pub_->publish(data);
     }
     catch (cv_bridge::Exception &e)
@@ -267,7 +325,9 @@ public:
 
     // Update the camera model
     model_.fromCameraInfo(l_info_msg, r_info_msg);
+// Convert the images to OpenCV format
 
+    
     // Allocate new disparity image message
     stereo_msgs::DisparityImagePtr disp_msg =
         boost::make_shared<stereo_msgs::DisparityImage>();
@@ -384,19 +444,20 @@ public:
     delete r_disp_data;
   }
 
+
 private:
   ros::NodeHandle nh;
   Subscriber left_sub_, right_sub_;
   InfoSubscriber left_info_sub_, right_info_sub_;
   boost::shared_ptr<Publisher> disp_pub_;
   boost::shared_ptr<Publisher> depth_pub_;
-  boost::shared_ptr<ros::Publisher> pc_pub_;
+  boost::shared_ptr<pcl_ros::Publisher<pcl::PointXYZRGB>> pc_pub_;
   boost::shared_ptr<ros::Publisher> elas_fd_pub_;
   boost::shared_ptr<ExactSync> exact_sync_;
   boost::shared_ptr<ApproximateSync> approximate_sync_;
   boost::shared_ptr<Elas> elas_;
   int queue_size_;
-
+  dynamic_reconfigure::Server<elas_ros::dynamicParamConfig> server;
   // Struct parameters
   int disp_min;
   int disp_max;
@@ -422,6 +483,10 @@ private:
   bool postprocess_only_left;
   bool subsampling;
 
+
+  std::string cam_frame;
+  image_geometry::PinholeCameraModel left_;
+  image_geometry::PinholeCameraModel right_;
   image_geometry::StereoCameraModel model_;
   ros::Publisher pub_disparity_;
   boost::scoped_ptr<Elas::parameters> param;

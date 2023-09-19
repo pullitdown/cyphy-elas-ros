@@ -73,7 +73,7 @@ void Elas::process (uint8_t* I1_,uint8_t* I2_,float* D1,float* D2,const int32_t*
 #endif
   vector<triangle> tri_1 = computeDelaunayTriangulation(p_support,0);
   vector<triangle> tri_2 = computeDelaunayTriangulation(p_support,1);
-
+  if(tri_1.size()==0 || tri_2.size()==0)return;
 #ifdef PROFILE
   timer.start("Disparity Planes");
 #endif

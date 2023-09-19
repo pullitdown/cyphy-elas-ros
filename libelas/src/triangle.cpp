@@ -7631,7 +7631,7 @@ void highorder(struct mesh *m, struct behavior *b)
 /*                                                                           */
 /*****************************************************************************/
 
-void transfernodes(struct mesh *m, struct behavior *b, float *pointlist,
+bool transfernodes(struct mesh *m, struct behavior *b, float *pointlist,
                    float *pointattriblist, int *pointmarkerlist,
                    int numberofpoints, int numberofpointattribs)
 {
@@ -7647,7 +7647,7 @@ void transfernodes(struct mesh *m, struct behavior *b, float *pointlist,
   m->readnodefile = 0;
   if (m->invertices < 3) {
     printf("Error:  Input must have at least three input vertices.\n");
-    triexit(1);
+    return false;
   }
   if (m->nextras == 0) {
     b->weighted = 0;
@@ -7690,6 +7690,7 @@ void transfernodes(struct mesh *m, struct behavior *b, float *pointlist,
   /* Nonexistent x value used as a flag to mark circle events in sweepline */
   /*   Delaunay algorithm.                                                 */
   m->xminextreme = 10 * m->xmin - 9 * m->xmax;
+  return true;
 }
 
 /*****************************************************************************/
@@ -8508,9 +8509,12 @@ void triangulate(char *triswitches, struct triangulateio *in,
   parsecommandline(1, &triswitches, &b);
   m.steinerleft = b.steiner;
 
-  transfernodes(&m, &b, in->pointlist, in->pointattributelist,
+  if(!transfernodes(&m, &b, in->pointlist, in->pointattributelist,
                 in->pointmarkerlist, in->numberofpoints,
-                in->numberofpointattributes);
+                in->numberofpointattributes))
+                {
+                  return;
+                }
 
   m.hullsize = delaunay(&m, &b);                /* Triangulate the vertices. */
   /* Ensure that no vertex can be mistaken for a triangular bounding */

@@ -1,29 +1,41 @@
 <launch>
     <!-- Launches ELAS node, and rectification nodes for input --> 
     <!-- Arguments: input stereo namespace and output elas namespace -->
+
+
+    <include file="$(find realsense2_camera)/launch/rs_camera.launch"/>
     <arg name="elas_ns" default="elas"/>
-    <node name="publish_info_euroc" pkg="lively_slam" type="publish_info_euroc" output="screen"/>
+
+    <node pkg="sci_ros" type="sci_node.py" name="sci_node">
+        <param name="sub_image_0" value='/infra1/image_rect_raw' />
+        <param name="sub_image_1" value='/infra2/image_rect_raw' />    
+        <param name="pub_image_0" value='/image_enhance_0' />
+        <param name="pub_image_1" value='/image_enhance_1' />
+        <param name="model_path" value="/home/sunteng/catkin_ws/src/sci_ros/ckpt/weights_122.pt"/>
+    </node>
+
+    <node name="publish_info_realsense" pkg="lively_slam" type="publish_info_realsense" output="screen"/>
     <!-- If you already have rectified camera images remove the image_proc nodes -->
-    <group ns="/cam0">
+    <!-- <group ns="/cam0">
         <node name="left_rect" pkg="image_proc" type="image_proc"/>
     </group>
     
     <group ns="/cam1">
         <node name="right_rect" pkg="image_proc" type="image_proc"/>
-    </group>
+    </group> -->
 
     <!-- This node actually does the stereo reconstruction -->
     <node name="$(arg elas_ns)" pkg="elas_ros" type="elas_ros" output="screen">
         
-        <param name="image_0"  type="string"  value="/cam0/image_rect" />
-        <param name="image_1"  type="string"  value="/cam1/image_rect"/>
-        <param name="image_info_0"  type="string" value="/cam0/camera_info" />
-        <param name="image_info_1" type="string" value="/cam1/camera_info" />
+        <param name="image_0"  type="string"  value="/image_enhance_0" />
+        <param name="image_1"  type="string"  value="/image_enhance_1"/>
+        <param name="image_info_0"  type="string" value="/infra1/camera_info" />
+        <param name="image_info_1" type="string" value="/infra2/camera_info" />
         <param name="cam_frame" type="string" value="cam_pos" />
 
-        <param name="disp_min" type="int" value="0"/>
+        <param name="disp_min" type="int" value="7"/>
         <param name="disp_max" type="int" value="255"/>
-        <param name="support_threshold" type="double" value="0.95"/>
+        <param name="support_threshold" type="double" value="0.80"/>
         <param name="support_texture" type="int" value="10"/>
         <param name="candidate_stepsize" type="int" value="5"/>
         <param name="incon_window_size" type="int" value="5"/>
@@ -39,8 +51,8 @@
         <param name="lr_threshold" type="int" value="2"/>
         <param name="speckle_sim_threshold" type="double" value="1"/>
         <param name="speckle_size" type="int" value="200"/>
-        <param name="ipol_gap_width" type="int" value="300"/>
-        <param name="filter_median" type="bool" value="0"/>
+        <param name="ipol_gap_width" type="int" value="50"/>
+        <param name="filter_median" type="bool" value="1"/>
         <param name="filter_adaptive_mean" type="bool" value="1"/>
         <param name="postprocess_only_left" type="bool" value="1"/>
         <param name="subsampling" type="bool" value="0"/>
@@ -48,4 +60,6 @@
         <!-- If your cameras are not synchronised then uncomment the following line -->
         <!-- <param name="approximate_sync" value="true" type="bool"/> -->
     </node>
+
+    <node  pkg="rviz" type="rviz" name="elas_vis" required="true" args="-d $(find elas_ros)/rviz/show_enhance.rviz"/>
 </launch>
