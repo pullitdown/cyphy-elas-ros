@@ -241,12 +241,7 @@ public:
       model.fromCameraInfo(*l_info_msg, *r_info_msg);
       pcl::PCLHeader l_info_header = pcl_conversions::toPCL(l_info_msg->header);
 
-      PointCloud::Ptr point_cloud(new PointCloud());
-      point_cloud->header.frame_id = this->cam_frame;
-      point_cloud->header.stamp = l_info_header.stamp;
-      point_cloud->width = 1;
-      point_cloud->height = inliers.size();
-      point_cloud->points.resize(inliers.size());
+
 
       elas_ros::ElasFrameData data;
       data.header.frame_id = this->cam_frame;
@@ -263,6 +258,14 @@ public:
       data.left = *l_info_msg;
       data.right = *r_info_msg;
 
+
+      PointCloud::Ptr point_cloud(new PointCloud());
+      point_cloud->header.frame_id = this->cam_frame;
+      point_cloud->header.stamp = l_info_header.stamp;
+      point_cloud->width = l_width;
+      point_cloud->height = l_height;
+      point_cloud->points.resize(l_width * l_height);
+      point_cloud->is_dense=false;
       // Copy into the data
       for (int32_t u = 0; u < l_width; u++)
       {
@@ -294,12 +297,12 @@ public:
 #endif
         cv::Point3d point;
         model.projectDisparityTo3d(left_uv, l_disp_data[index], point);
-        point_cloud->points[i].x = point.x;
-        point_cloud->points[i].y = point.y;
-        point_cloud->points[i].z = point.z;
-        point_cloud->points[i].r = data.r[index];
-        point_cloud->points[i].g = data.g[index];
-        point_cloud->points[i].b = data.b[index];
+        point_cloud->points[index].x = point.x;
+        point_cloud->points[index].y = point.y;
+        point_cloud->points[index].z = point.z;
+        point_cloud->points[index].r = data.r[index];
+        point_cloud->points[index].g = data.g[index];
+        point_cloud->points[index].b = data.b[index];
 
         data.x[index] = point.x;
         data.y[index] = point.y;

@@ -473,7 +473,10 @@ vector<Elas::triangle> Elas::computeDelaunayTriangulation (vector<support_pt> p_
 
   // do triangulation (z=zero-based, n=neighbors, Q=quiet, B=no boundary markers)
   char parameters[] = "zQB";
-  triangulate(parameters, &in, &out, NULL);
+  if(!triangulate(parameters, &in, &out, NULL)){
+    // printf("Error: triangulation failed\n");
+    return {};
+  }
   
   // put resulting triangles into vector tri
   vector<triangle> tri;

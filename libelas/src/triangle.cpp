@@ -7646,7 +7646,7 @@ bool transfernodes(struct mesh *m, struct behavior *b, float *pointlist,
   m->nextras = numberofpointattribs;
   m->readnodefile = 0;
   if (m->invertices < 3) {
-    printf("Error:  Input must have at least three input vertices.\n");
+    // printf("Error:  Input must have at least three input vertices.\n");
     return false;
   }
   if (m->nextras == 0) {
@@ -8497,7 +8497,7 @@ void statistics(struct mesh *m, struct behavior *b)
 /*                                                                           */
 /*****************************************************************************/
 
-void triangulate(char *triswitches, struct triangulateio *in,
+bool triangulate(char *triswitches, struct triangulateio *in,
                  struct triangulateio *out, struct triangulateio *vorout)
 {
   struct mesh m;
@@ -8513,7 +8513,7 @@ void triangulate(char *triswitches, struct triangulateio *in,
                 in->pointmarkerlist, in->numberofpoints,
                 in->numberofpointattributes))
                 {
-                  return;
+                  return 0;
                 }
 
   m.hullsize = delaunay(&m, &b);                /* Triangulate the vertices. */
@@ -8636,4 +8636,5 @@ void triangulate(char *triswitches, struct triangulateio *in,
   }
 
   triangledeinit(&m, &b);
+  return 1;
 }
