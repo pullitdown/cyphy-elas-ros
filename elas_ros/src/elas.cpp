@@ -502,7 +502,7 @@ public:
     // pub_disparity_.publish(disp_msg);
 
     // Cleanup data
-    delete l_disp_data;
+    // delete l_disp_data;
     delete r_disp_data;
   }
 
