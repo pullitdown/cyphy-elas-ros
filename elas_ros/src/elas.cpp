@@ -125,6 +125,7 @@ public:
     disp_pub_.reset(new Publisher(local_it.advertise("image_disparity", 1)));
     depth_pub_.reset(new Publisher(local_it.advertise("depth", 1)));
     pc_pub_.reset(new pcl_ros::Publisher<pcl::PointXYZRGB>(local_nh,"point_cloud", 1));
+    pc_pub_gray.reset(new pcl_ros::Publisher<pcl::PointXYZ>(local_nh,"point_cloud_gray",1));
     elas_fd_pub_.reset(new ros::Publisher(local_nh.advertise<elas_ros::ElasFrameData>("frame_data", 1)));
 
     pub_disparity_ = local_nh.advertise<stereo_msgs::DisparityImage>("disparity", 1);
@@ -284,6 +285,8 @@ public:
         }
       }
 
+
+
       for (size_t i = 0; i < inliers.size(); i++)
       {
         cv::Point2d left_uv;
@@ -300,6 +303,7 @@ public:
         point_cloud->points[index].x = point.x;
         point_cloud->points[index].y = point.y;
         point_cloud->points[index].z = point.z;
+
         point_cloud->points[index].r = data.r[index];
         point_cloud->points[index].g = data.g[index];
         point_cloud->points[index].b = data.b[index];
@@ -318,6 +322,59 @@ public:
     }
   }
 
+  
+
+  void publish_point_cloud_without_color(const sensor_msgs::ImageConstPtr &l_image_msg,
+                           float *l_disp_data, const std::vector<int32_t> &inliers,
+                           int32_t l_width, int32_t l_height,
+                           const sensor_msgs::CameraInfoConstPtr &l_info_msg,
+                           const sensor_msgs::CameraInfoConstPtr &r_info_msg)
+  {
+    try
+    {
+      image_geometry::StereoCameraModel model;
+      model.fromCameraInfo(*l_info_msg, *r_info_msg);
+      pcl::PCLHeader l_info_header = pcl_conversions::toPCL(l_info_msg->header);
+      pcl::PointCloud<pcl::PointXYZ>::Ptr point_cloud(new pcl::PointCloud<pcl::PointXYZ>());
+      point_cloud->header.frame_id = this->cam_frame;
+      point_cloud->header.stamp = l_info_header.stamp;
+      point_cloud->width = l_width;
+      point_cloud->height = l_height;
+      point_cloud->points.resize(l_width * l_height);
+      point_cloud->is_dense=false;
+
+      for (size_t i = 0; i < inliers.size(); i++)
+      {
+        cv::Point2d left_uv;
+        int32_t index = inliers[i];
+#ifdef DOWN_SAMPLE
+        left_uv.x = (index % l_width) * 2;
+        left_uv.y = (index / l_width) * 2;
+#else
+        left_uv.x = index % l_width;
+        left_uv.y = index / l_width;
+#endif
+        cv::Point3d point;
+        model.projectDisparityTo3d(left_uv, l_disp_data[index], point);
+        point_cloud->points[index].x = point.x;
+        point_cloud->points[index].y = point.y;
+        point_cloud->points[index].z = point.z;
+      }
+
+      pc_pub_gray->publish(*point_cloud);
+    }
+    catch (cv_bridge::Exception &e)
+    {
+      ROS_ERROR("cv_bridge exception: %s", e.what());
+    }
+  }
+
+
+  double getdepth(double disparity ,double fx,double baseline,double cxl,double cxr)
+  {
+
+    return  fx*baseline/(cxl-cxr-disparity);
+  }
   void process(const sensor_msgs::ImageConstPtr &l_image_msg,
                const sensor_msgs::ImageConstPtr &r_image_msg,
                const sensor_msgs::CameraInfoConstPtr &l_info_msg,
@@ -347,7 +404,10 @@ public:
     // Stereo parameters
     float f = model_.right().fx();
     float T = model_.baseline();
+
     float depth_fact = T * f * 1000.0f;
+
+
     uint16_t bad_point = std::numeric_limits<uint16_t>::max();
 
     // Have a synchronised pair of images, now to process using elas
@@ -422,14 +482,13 @@ public:
     std::vector<int32_t> inliers;
     for (int32_t i = 0; i < width * height; i++)
     {
-      out_msg.image.data[i] = (uint8_t)std::max(255.0 * l_disp_data[i] / disp_max, 0.0);
-      //disp_msg->image.data[i] = l_disp_data[i];
-      //disp_msg->image.data[i] = out_msg.image.data[i]
+      // out_msg.image.data[i] = (uint8_t)std::max(255.0 * l_disp_data[i] / disp_max, 0.0);
+      // //disp_msg->image.data[i] = l_disp_data[i];
+      // //disp_msg->image.data[i] = out_msg.image.data[i]
 
       float disp = l_disp_data[i];
-      // In milimeters
-      //out_depth_msg_image_data[i] = disp;
-      out_depth_msg_image_data[i] = disp <= 0.0f ? bad_point : (uint16_t)(depth_fact / disp);
+      // // In milimeters
+      out_depth_msg_image_data[i] = disp <= 0.0f ? bad_point : (uint16_t)(model_.getZ(disp));
 
       if (l_disp_data[i] > 0)
         inliers.push_back(i);
@@ -440,10 +499,10 @@ public:
     depth_pub_->publish(out_depth_msg.toImageMsg());
     publish_point_cloud(l_image_msg, l_disp_data, inliers, width, height, l_info_msg, r_info_msg);
 
-    pub_disparity_.publish(disp_msg);
+    // pub_disparity_.publish(disp_msg);
 
     // Cleanup data
-    //delete l_disp_data;
+    delete l_disp_data;
     delete r_disp_data;
   }
 
@@ -455,6 +514,7 @@ private:
   boost::shared_ptr<Publisher> disp_pub_;
   boost::shared_ptr<Publisher> depth_pub_;
   boost::shared_ptr<pcl_ros::Publisher<pcl::PointXYZRGB>> pc_pub_;
+  boost::shared_ptr<pcl_ros::Publisher<pcl::PointXYZ>> pc_pub_gray;
   boost::shared_ptr<ros::Publisher> elas_fd_pub_;
   boost::shared_ptr<ExactSync> exact_sync_;
   boost::shared_ptr<ApproximateSync> approximate_sync_;
