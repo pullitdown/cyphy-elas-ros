@@ -55,14 +55,9 @@
 #include <dynamic_reconfigure/server.h>
 #define DOWN_SAMPLE
 
-
-
 class Elas_Proc
 {
 public:
-
-  
-
   Elas_Proc(const std::string &transport)
   {
     ros::NodeHandle local_nh("~");
@@ -91,25 +86,25 @@ public:
     local_nh.param<bool>("filter_adaptive_mean", filter_adaptive_mean, 1);
     local_nh.param<bool>("postprocess_only_left", postprocess_only_left, 1);
     local_nh.param<bool>("subsampling", subsampling, 0);
-    
-    
+
+    local_nh.param<bool>("publish_elasdata_and_pc", publish_elasdata_and_pc, 0);
+    local_nh.param<bool>("publish_depth", publish_depth, 1);
+    local_nh.param<bool>("publish_disparity", publish_disparity, 0);
     // Topics
-    //  
+    //
     local_nh.param<std::string>("cam_frame", this->cam_frame, "cam_pos");
-    std::string left_topic ;
-    std::string right_topic ;
-    std::string left_info_topic ;
-    std::string right_info_topic ;
+    std::string left_topic;
+    std::string right_topic;
+    std::string left_info_topic;
+    std::string right_info_topic;
     local_nh.param<std::string>("image_0", left_topic, "/cam0/image_rect");
-    local_nh.param<std::string>("image_1", right_topic, "/cam1/image_rect");    
+    local_nh.param<std::string>("image_1", right_topic, "/cam1/image_rect");
     local_nh.param<std::string>("image_info_0", left_info_topic, "/cam0/camera_info");
     local_nh.param<std::string>("image_info_1", right_info_topic, "/cam1/camera_info");
 
+    ROS_WARN("This is a warning message", left_topic, left_info_topic);
 
-    ROS_WARN("This is a warning message",left_topic,left_info_topic);
-
-    
-    dynamic_reconfigure::Server<elas_ros::dynamicParamConfig>::CallbackType f= boost::bind(&Elas_Proc::callback__, this, _1, _2);
+    dynamic_reconfigure::Server<elas_ros::dynamicParamConfig>::CallbackType f = boost::bind(&Elas_Proc::callback__, this, _1, _2);
     this->server.setCallback(f);
 
     image_transport::ImageTransport it(nh);
@@ -124,8 +119,8 @@ public:
 
     disp_pub_.reset(new Publisher(local_it.advertise("image_disparity", 1)));
     depth_pub_.reset(new Publisher(local_it.advertise("depth", 1)));
-    pc_pub_.reset(new pcl_ros::Publisher<pcl::PointXYZRGB>(local_nh,"point_cloud", 1));
-    pc_pub_gray.reset(new pcl_ros::Publisher<pcl::PointXYZ>(local_nh,"point_cloud_gray",1));
+    pc_pub_.reset(new pcl_ros::Publisher<pcl::PointXYZRGB>(local_nh, "point_cloud", 1));
+    pc_pub_gray.reset(new pcl_ros::Publisher<pcl::PointXYZ>(local_nh, "point_cloud_gray", 1));
     elas_fd_pub_.reset(new ros::Publisher(local_nh.advertise<elas_ros::ElasFrameData>("frame_data", 1)));
 
     pub_disparity_ = local_nh.advertise<stereo_msgs::DisparityImage>("disparity", 1);
@@ -147,8 +142,8 @@ public:
     }
 
     // Create the elas processing class
-    //param.reset(new Elas::parameters(Elas::MIDDLEBURY));
-    //param.reset(new Elas::parameters(Elas::ROBOTICS));
+    // param.reset(new Elas::parameters(Elas::MIDDLEBURY));
+    // param.reset(new Elas::parameters(Elas::ROBOTICS));
     param.reset(new Elas::parameters);
 
     /* Parameters tunned*/
@@ -176,15 +171,16 @@ public:
     param->postprocess_only_left = postprocess_only_left;
     param->subsampling = subsampling;
 
-    //param->match_texture = 1;
-    //param->postprocess_only_left = 1;
-    //param->ipol_gap_width = 2;
+    // param->match_texture = 1;
+    // param->postprocess_only_left = 1;
+    // param->ipol_gap_width = 2;
 #ifdef DOWN_SAMPLE
     param->subsampling = true;
 #endif
     elas_.reset(new Elas(*param));
   }
-  void callback__(elas_ros::dynamicParamConfig &config, uint32_t level) {
+  void callback__(elas_ros::dynamicParamConfig &config, uint32_t level)
+  {
 
     param.reset(new Elas::parameters);
 
@@ -213,12 +209,11 @@ public:
     param->postprocess_only_left = config.postprocess_only_left;
     param->subsampling = config.subsampling;
 
-    
 #ifdef DOWN_SAMPLE
     param->subsampling = true;
 #endif
     elas_.reset(new Elas(*param));
-}
+  }
   typedef image_transport::SubscriberFilter Subscriber;
   typedef message_filters::Subscriber<sensor_msgs::CameraInfo> InfoSubscriber;
   typedef image_transport::Publisher Publisher;
@@ -242,8 +237,6 @@ public:
       model.fromCameraInfo(*l_info_msg, *r_info_msg);
       pcl::PCLHeader l_info_header = pcl_conversions::toPCL(l_info_msg->header);
 
-
-
       elas_ros::ElasFrameData data;
       data.header.frame_id = this->cam_frame;
       data.header.stamp = l_info_msg->header.stamp;
@@ -259,14 +252,13 @@ public:
       data.left = *l_info_msg;
       data.right = *r_info_msg;
 
-
       PointCloud::Ptr point_cloud(new PointCloud());
       point_cloud->header.frame_id = this->cam_frame;
       point_cloud->header.stamp = l_info_header.stamp;
       point_cloud->width = l_width;
       point_cloud->height = l_height;
       point_cloud->points.resize(l_width * l_height);
-      point_cloud->is_dense=false;
+      point_cloud->is_dense = false;
       // Copy into the data
       for (int32_t u = 0; u < l_width; u++)
       {
@@ -284,8 +276,6 @@ public:
           data.b[index] = col[2];
         }
       }
-
-
 
       for (size_t i = 0; i < inliers.size(); i++)
       {
@@ -322,13 +312,11 @@ public:
     }
   }
 
-  
-
   void publish_point_cloud_without_color(const sensor_msgs::ImageConstPtr &l_image_msg,
-                           float *l_disp_data, const std::vector<int32_t> &inliers,
-                           int32_t l_width, int32_t l_height,
-                           const sensor_msgs::CameraInfoConstPtr &l_info_msg,
-                           const sensor_msgs::CameraInfoConstPtr &r_info_msg)
+                                         float *l_disp_data, const std::vector<int32_t> &inliers,
+                                         int32_t l_width, int32_t l_height,
+                                         const sensor_msgs::CameraInfoConstPtr &l_info_msg,
+                                         const sensor_msgs::CameraInfoConstPtr &r_info_msg)
   {
     try
     {
@@ -341,7 +329,7 @@ public:
       point_cloud->width = l_width;
       point_cloud->height = l_height;
       point_cloud->points.resize(l_width * l_height);
-      point_cloud->is_dense=false;
+      point_cloud->is_dense = false;
 
       for (size_t i = 0; i < inliers.size(); i++)
       {
@@ -369,11 +357,10 @@ public:
     }
   }
 
-
-  double getdepth(double disparity ,double fx,double baseline,double cxl,double cxr)
+  double getdepth(double disparity, double fx, double baseline, double cxl, double cxr)
   {
 
-    return  fx*baseline/(cxl-cxr-disparity);
+    return fx * baseline / (cxl - cxr - disparity);
   }
   void process(const sensor_msgs::ImageConstPtr &l_image_msg,
                const sensor_msgs::ImageConstPtr &r_image_msg,
@@ -385,9 +372,8 @@ public:
 
     // Update the camera model
     model_.fromCameraInfo(l_info_msg, r_info_msg);
-// Convert the images to OpenCV format
+    // Convert the images to OpenCV format
 
-    
     // Allocate new disparity image message
     stereo_msgs::DisparityImagePtr disp_msg =
         boost::make_shared<stereo_msgs::DisparityImage>();
@@ -407,8 +393,7 @@ public:
 
     float depth_fact = T * f * 1000.0f;
 
-
-    uint16_t bad_point = std::numeric_limits<uint16_t>::max();
+    float bad_point = std::numeric_limits<float>::max();
 
     // Have a synchronised pair of images, now to process using elas
     // convert images if necessary
@@ -452,7 +437,7 @@ public:
 
     // Allocate
     const int32_t dims[3] = {l_image_msg->width, l_image_msg->height, l_step};
-    //float* l_disp_data = new float[width*height*sizeof(float)];
+    // float* l_disp_data = new float[width*height*sizeof(float)];
     float *l_disp_data = reinterpret_cast<float *>(&disp_msg->image.data[0]);
     float *r_disp_data = new float[width * height * sizeof(float)];
 
@@ -469,43 +454,54 @@ public:
         disp_max = r_disp_data[i];
     }
 
-    cv_bridge::CvImage out_depth_msg;
-    out_depth_msg.header = l_image_msg->header;
-    out_depth_msg.encoding = sensor_msgs::image_encodings::MONO16;
-    out_depth_msg.image = cv::Mat(height, width, CV_16UC1);
-    uint16_t *out_depth_msg_image_data = reinterpret_cast<uint16_t *>(&out_depth_msg.image.data[0]);
-
-    cv_bridge::CvImage out_msg;
-    out_msg.header = l_image_msg->header;
-    out_msg.encoding = sensor_msgs::image_encodings::MONO8;
-    out_msg.image = cv::Mat(height, width, CV_8UC1);
-    std::vector<int32_t> inliers;
-    for (int32_t i = 0; i < width * height; i++)
+    if (publish_depth)
     {
-      // out_msg.image.data[i] = (uint8_t)std::max(255.0 * l_disp_data[i] / disp_max, 0.0);
-      // //disp_msg->image.data[i] = l_disp_data[i];
-      // //disp_msg->image.data[i] = out_msg.image.data[i]
-
-      float disp = l_disp_data[i];
-      // // In milimeters
-      out_depth_msg_image_data[i] = disp <= 0.0f ? bad_point : (uint16_t)(model_.getZ(disp));
-
-      if (l_disp_data[i] > 0)
-        inliers.push_back(i);
+      cv_bridge::CvImage out_depth_msg;
+      out_depth_msg.header = l_image_msg->header;
+      out_depth_msg.encoding = sensor_msgs::image_encodings::TYPE_32FC1;
+      // 修改图像类型为CV_32FC1
+      cv::Mat depth_mat(height, width, CV_32FC1);
+      float disp;
+      for (int32_t y = 0; y < height; y++)
+      {
+        for (int32_t x = 0; x < width; x++)
+        {
+          disp = l_disp_data[y*width+x]; // Calculate the disparity here.
+          depth_mat.at<float>(y, x) = disp <= 0.0f ? bad_point : model_.getZ(disp);
+        }
+      }
+      out_depth_msg.image = depth_mat;
+      depth_pub_->publish(out_depth_msg.toImageMsg());
     }
 
-    // Publish
-    disp_pub_->publish(out_msg.toImageMsg());
-    depth_pub_->publish(out_depth_msg.toImageMsg());
-    publish_point_cloud(l_image_msg, l_disp_data, inliers, width, height, l_info_msg, r_info_msg);
-
-    // pub_disparity_.publish(disp_msg);
+    if (publish_disparity)
+    {
+      cv_bridge::CvImage out_msg;
+      out_msg.header = l_image_msg->header;
+      out_msg.encoding = sensor_msgs::image_encodings::MONO8;
+      out_msg.image = cv::Mat(height, width, CV_8UC1);
+      for (int32_t i = 0; i < width * height; i++)
+      {
+        out_msg.image.data[i] = (uint8_t)std::max(255.0 * l_disp_data[i] / disp_max, 0.0);
+      }
+      disp_pub_->publish(out_msg.toImageMsg());
+    }
+    if (publish_elasdata_and_pc)
+    {
+      std::vector<int32_t> inliers;
+      for (int32_t i = 0; i < width * height; i++)
+      {
+        if (l_disp_data[i] > 0)
+          inliers.push_back(i);
+      }
+      publish_point_cloud(l_image_msg, l_disp_data, inliers, width, height, l_info_msg, r_info_msg);
+    }
 
     // Cleanup data
+
     // delete l_disp_data;
     delete r_disp_data;
   }
-
 
 private:
   ros::NodeHandle nh;
@@ -545,7 +541,9 @@ private:
   bool filter_adaptive_mean;
   bool postprocess_only_left;
   bool subsampling;
-
+  bool publish_elasdata_and_pc;
+  bool publish_depth;
+  bool publish_disparity;
 
   std::string cam_frame;
   image_geometry::PinholeCameraModel left_;
