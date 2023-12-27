@@ -90,6 +90,10 @@ public:
     local_nh.param<bool>("publish_elasdata_and_pc", publish_elasdata_and_pc, 0);
     local_nh.param<bool>("publish_depth", publish_depth, 1);
     local_nh.param<bool>("publish_disparity", publish_disparity, 0);
+
+    local_nh.param<bool>("publish_color_pc", publish_color_pc, 1);
+    local_nh.param<bool>("publish_gray_pc", publish_gray_pc, 1);
+
     // Topics
     //
     local_nh.param<std::string>("cam_frame", this->cam_frame, "cam_pos");
@@ -312,6 +316,60 @@ public:
     }
   }
 
+
+
+  void publish_point_cloud_with_color(const sensor_msgs::ImageConstPtr &l_image_msg,
+                                         float *l_disp_data, const std::vector<int32_t> &inliers,
+                                         int32_t l_width, int32_t l_height,
+                                         const sensor_msgs::CameraInfoConstPtr &l_info_msg,
+                                         const sensor_msgs::CameraInfoConstPtr &r_info_msg)
+  {
+    try
+    {
+      cv_bridge::CvImageConstPtr cv_ptr;
+      cv_ptr = cv_bridge::toCvShare(l_image_msg, sensor_msgs::image_encodings::RGB8);
+      image_geometry::StereoCameraModel model;
+      model.fromCameraInfo(*l_info_msg, *r_info_msg);
+      pcl::PCLHeader l_info_header = pcl_conversions::toPCL(l_info_msg->header);
+      pcl::PointCloud<pcl::PointXYZRGB>::Ptr point_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());
+      point_cloud->header.frame_id = this->cam_frame;
+      point_cloud->header.stamp = l_info_header.stamp;
+      point_cloud->width = l_width;
+      point_cloud->height = l_height;
+      point_cloud->points.resize(l_width * l_height);
+      point_cloud->is_dense = false;
+
+      for (size_t i = 0; i < inliers.size(); i++)
+      {
+        cv::Point2d left_uv;
+        int32_t index = inliers[i];
+#ifdef DOWN_SAMPLE
+        left_uv.x = (index % l_width) * 2;
+        left_uv.y  = (index / l_width) * 2;
+#else
+        left_uv.x = index % l_width;
+        left_uv.y = index / l_width;
+#endif
+
+        cv::Vec3b col = cv_ptr->image.at<cv::Vec3b>(left_uv.y , left_uv.x );
+        cv::Point3d point;
+        model.projectDisparityTo3d(left_uv, l_disp_data[index], point);
+        point_cloud->points[index].x = point.x;
+        point_cloud->points[index].y = point.y;
+        point_cloud->points[index].z = point.z;
+        point_cloud->points[index].r = col[0];
+        point_cloud->points[index].g = col[1];
+        point_cloud->points[index].b = col[2];
+      }
+
+      pc_pub_->publish(*point_cloud);
+    }
+    catch (cv_bridge::Exception &e)
+    {
+      ROS_ERROR("cv_bridge exception: %s", e.what());
+    }
+  }
+
   void publish_point_cloud_without_color(const sensor_msgs::ImageConstPtr &l_image_msg,
                                          float *l_disp_data, const std::vector<int32_t> &inliers,
                                          int32_t l_width, int32_t l_height,
@@ -486,7 +544,7 @@ public:
       }
       disp_pub_->publish(out_msg.toImageMsg());
     }
-    if (publish_elasdata_and_pc)
+    if (publish_color_pc)
     {
       std::vector<int32_t> inliers;
       for (int32_t i = 0; i < width * height; i++)
@@ -494,7 +552,17 @@ public:
         if (l_disp_data[i] > 0)
           inliers.push_back(i);
       }
-      publish_point_cloud(l_image_msg, l_disp_data, inliers, width, height, l_info_msg, r_info_msg);
+      publish_point_cloud_with_color(l_image_msg, l_disp_data, inliers, width, height, l_info_msg, r_info_msg);
+    }
+    if (publish_gray_pc)
+    {
+      std::vector<int32_t> inliers;
+      for (int32_t i = 0; i < width * height; i++)
+      {
+        if (l_disp_data[i] > 0)
+          inliers.push_back(i);
+      }
+      publish_point_cloud_without_color(l_image_msg, l_disp_data, inliers, width, height, l_info_msg, r_info_msg);
     }
 
     // Cleanup data
@@ -544,6 +612,8 @@ private:
   bool publish_elasdata_and_pc;
   bool publish_depth;
   bool publish_disparity;
+  bool publish_color_pc;
+  bool publish_gray_pc;
 
   std::string cam_frame;
   image_geometry::PinholeCameraModel left_;

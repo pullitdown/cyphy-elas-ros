@@ -78,6 +78,8 @@
         <param name="filter_adaptive_mean" type="bool" value="1"/>
         <param name="postprocess_only_left" type="bool" value="1"/>
         <param name="subsampling" type="bool" value="0"/>
+        <param name="publish_gray_pc" type="bool" value="1"/>
+        <param name="publish_color_pc" type="bool" value="0"/>
 
         <!-- If your cameras are not synchronised then uncomment the following line -->
         <!-- <param name="approximate_sync" value="true" type="bool"/> -->
