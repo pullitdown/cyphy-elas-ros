@@ -20,162 +20,41 @@ Street, Fifth Floor, Boston, MA 02110-1301, USA
 */
 
 #include "elas.h"
-#include <random>
+
+#include <arm_neon.h>
 #include <math.h>
 #include "descriptor.h"
 #include "triangle.h"
 #include "matrix.h"
+
 using namespace std;
 
-void Elas::process (uint8_t* I1_,uint8_t* I2_,float* D1,float* D2,const int32_t* dims,cv::Mat& refined,cv::Mat& feature_img){
-  
-  // get width, height and bytes per line
-  width  = dims[0];
-  height = dims[1];
-  bpl    = width + 15-(width-1)%16;
-  
-  // copy images to byte aligned memory
-  I1 = (uint8_t*)_mm_malloc(bpl*height*sizeof(uint8_t),16);
-  I2 = (uint8_t*)_mm_malloc(bpl*height*sizeof(uint8_t),16);
-  memset (I1,0,bpl*height*sizeof(uint8_t));
-  memset (I2,0,bpl*height*sizeof(uint8_t));
-  if (bpl==dims[2]) {
-    memcpy(I1,I1_,bpl*height*sizeof(uint8_t));
-    memcpy(I2,I2_,bpl*height*sizeof(uint8_t));
-  } else {
-    for (int32_t v=0; v<height; v++) {
-      memcpy(I1+v*bpl,I1_+v*dims[2],width*sizeof(uint8_t));
-      memcpy(I2+v*bpl,I2_+v*dims[2],width*sizeof(uint8_t));
-    }
-  }
 
-
-
-  // allocate memory for disparity grid
-  int32_t grid_width   = (int32_t)ceil((float)width/(float)param.grid_size);
-  int32_t grid_height  = (int32_t)ceil((float)height/(float)param.grid_size);
-  int32_t grid_dims[3] = {param.disp_max+2,grid_width,grid_height};
-  int32_t* disparity_grid_1 = (int32_t*)calloc((param.disp_max+2)*grid_height*grid_width,sizeof(int32_t));
-  int32_t* disparity_grid_2 = (int32_t*)calloc((param.disp_max+2)*grid_height*grid_width,sizeof(int32_t));
-
-#ifdef PROFILE
-  timer.start("Descriptor");  
-#endif
-  Descriptor desc1(I1,width,height,bpl,param.subsampling);
-  Descriptor desc2(I2,width,height,bpl,param.subsampling);
-
-#ifdef PROFILE
-  timer.start("Support Matches");
-#endif
-  std::vector<cv::Point> selected_points;
-  computeCandidate(desc1.I_du_16,desc1.I_dv_16,refined,selected_points);
-#ifdef line_enforce
-  vector<support_pt> p_support = computeSupportMatchesLineEnforce(desc1.I_desc,desc2.I_desc,selected_points);
-#else
-  vector<support_pt> p_support = computeSupportMatches(desc1.I_desc,desc2.I_desc);
-#endif
-
-  for (const auto& point : p_support) {
-
-    cv::circle(feature_img, cv::Point2f(point.u,point.v), 3, cv::Scalar(0, 255, 0), cv::FILLED);
-}
-#ifdef PROFILE
-  timer.start("Delaunay Triangulation");
-#endif
-  vector<triangle> tri_1 = computeDelaunayTriangulation(p_support,0);
-  vector<triangle> tri_2 = computeDelaunayTriangulation(p_support,1);
-  if(tri_1.size()==0 || tri_2.size()==0)return;
-#ifdef PROFILE
-  timer.start("Disparity Planes");
-#endif
-  computeDisparityPlanes(p_support,tri_1,0);
-  computeDisparityPlanes(p_support,tri_2,1);
-
-#ifdef PROFILE
-  timer.start("Grid");
-#endif
-  createGrid(p_support,disparity_grid_1,grid_dims,0);
-  createGrid(p_support,disparity_grid_2,grid_dims,1);
-
-#ifdef PROFILE
-  timer.start("Matching");
-#endif
-  computeDisparity(p_support,tri_1,disparity_grid_1,grid_dims,desc1.I_desc,desc2.I_desc,0,D1);
-  computeDisparity(p_support,tri_2,disparity_grid_2,grid_dims,desc1.I_desc,desc2.I_desc,1,D2);
-
-#ifdef PROFILE
-  timer.start("L/R Consistency Check");
-#endif
-  leftRightConsistencyCheck(D1,D2);
-
-#ifdef PROFILE
-  timer.start("Remove Small Segments");
-#endif
-  removeSmallSegments(D1);
-  if (!param.postprocess_only_left)
-    removeSmallSegments(D2);
-
-#ifdef PROFILE
-  timer.start("Gap Interpolation");
-#endif
-  gapInterpolation(D1);
-  if (!param.postprocess_only_left)
-    gapInterpolation(D2);
-
-  if (param.filter_adaptive_mean) {
-#ifdef PROFILE
-    timer.start("Adaptive Mean");
-#endif
-    adaptiveMean(D1);
-    if (!param.postprocess_only_left)
-      adaptiveMean(D2);
-  }
-
-  if (param.filter_median) {
-#ifdef PROFILE
-    timer.start("Median");
-#endif
-    median(D1);
-    if (!param.postprocess_only_left)
-      median(D2);
-  }
-
-#ifdef PROFILE
-  timer.plot();
-#endif
-
-  // release memory
-  free(disparity_grid_1);
-  free(disparity_grid_2);
-  _mm_free(I1);
-  _mm_free(I2);
-}
-
-
+/***
+ * @param dims mean the source image data 's width height and bpl
+*/
 void Elas::process (uint8_t* I1_,uint8_t* I2_,float* D1,float* D2,const int32_t* dims){
   
   // get width, height and bytes per line
   width  = dims[0];
   height = dims[1];
-  bpl    = width + 15-(width-1)%16;
+  bpl    = width + 15-(width-1)%16;// let the memory aligned 16 ,because use 128 bit instruction contain 16 uint_8 data
   
-  // copy images to byte aligned memory
-  I1 = (uint8_t*)_mm_malloc(bpl*height*sizeof(uint8_t),16);
-  I2 = (uint8_t*)_mm_malloc(bpl*height*sizeof(uint8_t),16);
-  memset (I1,0,bpl*height*sizeof(uint8_t));
+  I1 = (uint8_t*)aligned_alloc(16, bpl * height * sizeof(uint8_t));// 16 bit per pixel desc
+  I2 = (uint8_t*)aligned_alloc(16, bpl * height * sizeof(uint8_t));
+  memset (I1,0,bpl*height*sizeof(uint8_t));//
   memset (I2,0,bpl*height*sizeof(uint8_t));
   if (bpl==dims[2]) {
     memcpy(I1,I1_,bpl*height*sizeof(uint8_t));
     memcpy(I2,I2_,bpl*height*sizeof(uint8_t));
-  } else {
+  } 
+  else {
     for (int32_t v=0; v<height; v++) {
       memcpy(I1+v*bpl,I1_+v*dims[2],width*sizeof(uint8_t));
       memcpy(I2+v*bpl,I2_+v*dims[2],width*sizeof(uint8_t));
     }
   }
-
-
-
+  
   // allocate memory for disparity grid
   int32_t grid_width   = (int32_t)ceil((float)width/(float)param.grid_size);
   int32_t grid_height  = (int32_t)ceil((float)height/(float)param.grid_size);
@@ -192,12 +71,7 @@ void Elas::process (uint8_t* I1_,uint8_t* I2_,float* D1,float* D2,const int32_t*
 #ifdef PROFILE
   timer.start("Support Matches");
 #endif
-
-
   vector<support_pt> p_support = computeSupportMatches(desc1.I_desc,desc2.I_desc);
-
-
-
 
 #ifdef PROFILE
   timer.start("Delaunay Triangulation");
@@ -267,8 +141,8 @@ void Elas::process (uint8_t* I1_,uint8_t* I2_,float* D1,float* D2,const int32_t*
   // release memory
   free(disparity_grid_1);
   free(disparity_grid_2);
-  _mm_free(I1);
-  _mm_free(I2);
+  free(I1);
+  free(I2);
 }
 
 void Elas::removeInconsistentSupportPoints (int16_t* D_can,int32_t D_can_width,int32_t D_can_height) {
@@ -387,19 +261,18 @@ void Elas::addCornerSupportPoints(vector<support_pt> &p_support) {
     p_support.push_back(p_border[i]);
 }
 
-//match the disparity
-inline int16_t Elas::computeMatchingDisparity (const int32_t &u,const int32_t &v,uint8_t* I1_desc,uint8_t* I2_desc,const bool &right_image) {
+inline int16_t Elas::computeMatchingDisparity_neon (const int32_t &u,const int32_t &v,uint8_t* I1_desc,uint8_t* I2_desc,const bool &right_image) {
   
   const int32_t u_step      = 2;
   const int32_t v_step      = 2;
   const int32_t window_size = 3;
   
-  int32_t desc_offset_1 = -16*u_step-16*width*v_step;
+  int32_t desc_offset_1 = -16*u_step-16*width*v_step;// get the square conner pixel's describe vector 
   int32_t desc_offset_2 = +16*u_step-16*width*v_step;
   int32_t desc_offset_3 = -16*u_step+16*width*v_step;
-  int32_t desc_offset_4 = +16*u_step+16*width*v_step;//get the square conner
+  int32_t desc_offset_4 = +16*u_step+16*width*v_step;
   
-  __m128i xmm1,xmm2,xmm3,xmm4,xmm5,xmm6;//get all the desc_offset_1
+  int8x16_t xmm1,xmm2,xmm3,xmm4,xmm5,xmm6;
 
   // check if we are inside the image region
   if (u>=window_size+u_step && u<=width-window_size-1-u_step && v>=window_size+v_step && v<=height-window_size-1-v_step) 
@@ -428,10 +301,10 @@ inline int16_t Elas::computeMatchingDisparity (const int32_t &u,const int32_t &v
       return -1;
     
     // load first blocks to xmm registers
-    xmm1 = _mm_load_si128((__m128i*)(I1_block_addr+desc_offset_1));
-    xmm2 = _mm_load_si128((__m128i*)(I1_block_addr+desc_offset_2));
-    xmm3 = _mm_load_si128((__m128i*)(I1_block_addr+desc_offset_3));
-    xmm4 = _mm_load_si128((__m128i*)(I1_block_addr+desc_offset_4));
+    xmm1 = vld1q_u8(I1_block_addr+desc_offset_1);
+    xmm2 = vld1q_u8(I1_block_addr+desc_offset_2);
+    xmm3 = vld1q_u8(I1_block_addr+desc_offset_3);
+    xmm4 = vld1q_u8(I1_block_addr+desc_offset_4);
     
     // declare match energy for each disparity
     int32_t u_warp;
@@ -463,13 +336,13 @@ inline int16_t Elas::computeMatchingDisparity (const int32_t &u,const int32_t &v
       I2_block_addr = I2_line_addr+16*u_warp;
 
       // compute match energy at this disparity
-      xmm6 = _mm_load_si128((__m128i*)(I2_block_addr+desc_offset_1));
+      xmm6 = vld1q_u8(I2_block_addr+desc_offset_1);
       xmm6 = _mm_sad_epu8(xmm1,xmm6);
-      xmm5 = _mm_load_si128((__m128i*)(I2_block_addr+desc_offset_2));
+      xmm5 = vld1q_u8(I2_block_addr+desc_offset_2);
       xmm6 = _mm_add_epi16(_mm_sad_epu8(xmm2,xmm5),xmm6);
-      xmm5 = _mm_load_si128((__m128i*)(I2_block_addr+desc_offset_3));
+      xmm5 = vld1q_u8(I2_block_addr+desc_offset_3);
       xmm6 = _mm_add_epi16(_mm_sad_epu8(xmm3,xmm5),xmm6);
-      xmm5 = _mm_load_si128((__m128i*)(I2_block_addr+desc_offset_4));
+      xmm5 = vld1q_u8(I2_block_addr+desc_offset_4);
       xmm6 = _mm_add_epi16(_mm_sad_epu8(xmm4,xmm5),xmm6);
       sum  = _mm_extract_epi16(xmm6,0)+_mm_extract_epi16(xmm6,4);
 
@@ -493,8 +366,7 @@ inline int16_t Elas::computeMatchingDisparity (const int32_t &u,const int32_t &v
     return -1;
 }
 
-vector<Elas::support_pt> Elas::computeSupportMatches (uint8_t* I1_desc,uint8_t* I2_desc) //get the desc
-{
+vector<Elas::support_pt> Elas::computeSupportMatches (uint8_t* I1_desc,uint8_t* I2_desc) {
   
   // be sure that at half resolution we only need data
   // from every second line!
@@ -517,17 +389,17 @@ vector<Elas::support_pt> Elas::computeSupportMatches (uint8_t* I1_desc,uint8_t* 
   for (int32_t u_can=1; u_can<D_can_width; u_can++) {
     u = u_can*D_candidate_stepsize;
     for (int32_t v_can=1; v_can<D_can_height; v_can++) {
-      v = v_can*D_candidate_stepsize;
+      v = v_can*D_candidate_stepsize;//get correspond pixel position
       
       // initialize disparity candidate to invalid
       *(D_can+getAddressOffsetImage(u_can,v_can,D_can_width)) = -1;
       
       // find forwards
-      d = computeMatchingDisparity(u,v,I1_desc,I2_desc,false);// use the desc mat to compute the match disparity
+      d = computeMatchingDisparity_neon(u,v,I1_desc,I2_desc,false);
       if (d>=0) {
         
         // find backwards
-        d2 = computeMatchingDisparity(u-d,v,I1_desc,I2_desc,true);
+        d2 = computeMatchingDisparity_neon(u-d,v,I1_desc,I2_desc,true);
         if (d2>=0 && abs(d-d2)<=param.lr_threshold)
           *(D_can+getAddressOffsetImage(u_can,v_can,D_can_width)) = d;
       }
@@ -560,249 +432,6 @@ vector<Elas::support_pt> Elas::computeSupportMatches (uint8_t* I1_desc,uint8_t* 
   // free memory
   free(D_can);
   
-  // return support point vector
-  return p_support; 
-}
-
-void non_maximization_suppress(const int H, const int W, const cv::Mat& gradients, const cv::Mat& directions,cv::Mat& nms_result) {
-    // 创建结果矩阵，初始化为零
-     gradients.copyTo(nms_result);
-    
-    // 开始非极大化抑制
-    for (int i = 1; i < H - 1; ++i) {
-        for (int j = 1; j < W - 1; ++j) {
-            // 开始检查方向
-            double lhs, rhs;
-            const float ratio = directions.at<float>(i, j);
-            
-            // 根据方向确定左右两个值
-            if (0 <= ratio && ratio < 1) {
-                lhs = ratio * gradients.at<double>(i + 1, j - 1) + (1 - ratio) * gradients.at<double>(i, j - 1);
-                rhs = ratio * gradients.at<double>(i - 1, j + 1) + (1 - ratio) * gradients.at<double>(i, j + 1);
-            } else if (ratio >= 1) {
-                const float ratio_inv = 1.0 / ratio;
-                lhs = ratio_inv * gradients.at<double>(i + 1, j - 1) + (1 - ratio_inv) * gradients.at<double>(i + 1, j);
-                rhs = ratio_inv * gradients.at<double>(i - 1, j + 1) + (1 - ratio_inv) * gradients.at<double>(i - 1, j);
-            } else if (ratio > -1 && ratio < 0) {
-                lhs = -ratio * gradients.at<double>(i - 1, j - 1) + (1 + ratio) * gradients.at<double>(i, j - 1);
-                rhs = -ratio * gradients.at<double>(i + 1, j + 1) + (1 + ratio) * gradients.at<double>(i, j + 1);
-            } else if (ratio <= -1) {
-                const float ratio_inv = 1.0 / ratio;
-                lhs = -ratio_inv * gradients.at<double>(i - 1, j - 1) + (1 + ratio_inv) * gradients.at<double>(i - 1, j);
-                rhs = -ratio_inv * gradients.at<double>(i + 1, j + 1) + (1 + ratio_inv) * gradients.at<double>(i + 1, j);
-            }
-            
-            // 如果不是这个梯度方向上的局部极值, 删除这个梯度响应
-            if (gradients.at<double>(i, j) < lhs || gradients.at<double>(i, j) < rhs) 
-                nms_result.at<double>(i, j) = 0.0;
-        }
-    }
-}
-
-void double_threshold_filter(const int H, const int W, const cv::Mat& nms_result_mat, const double low_threshold, const double high_threshold,cv::Mat &refined) {
-    // 确保输入矩阵的尺寸和类型正确
-    // CV_Assert(nms_result_mat.type() == CV_64FC1 && nms_result_mat.rows == H && nms_result_mat.cols == W);
-
-    // 准备一个结果
-    // cv::Mat refined=cv::Mat::zeros(H,W,CV_8UC1);
-
-    for(int i = 1; i < H - 1; ++i) {
-        const double* const nms_ptr = nms_result_mat.ptr<double>(i);
-        uchar*  res_ptr = refined.ptr<uchar>(i);
-        for(int j = 1;j < W - 1; ++j) {
-            if(nms_ptr[j] > high_threshold) res_ptr[j] = 255;
-            else if(nms_ptr[j] > low_threshold) res_ptr[j] = 128;
-        }
-    }
-    for(int i = 1; i < H - 1; ++i) {
-        uchar* const res_ptr = refined.ptr<uchar>(i);
-        for(int j = 1;j < W - 1; ++j) {
-            if(res_ptr[j] == 128) {
-                if(res_ptr[j - 1] == 255 or res_ptr[j + 1] == 255 or
-                   res_ptr[j - 1 - W] == 255 or res_ptr[j - W] == 255 or res_ptr[j + 1 - W] == 255 or
-                   res_ptr[j - 1 + W] == 255 or res_ptr[j + W] == 255 or res_ptr[j + 1 + W] == 255)
-                    res_ptr[j] = 255;
-            }
-        }
-    }
-    for(int i = 1; i < H - 1; ++i) {
-        uchar* const res_ptr = refined.ptr<uchar>(i);
-        for(int j = W - 2;j > 0; --j) {
-            if(res_ptr[j] == 128) {
-                if(res_ptr[j - 1] == 255 or res_ptr[j + 1] == 255 or
-                   res_ptr[j - 1 - W] == 255 or res_ptr[j - W] == 255 or res_ptr[j + 1 - W] == 255 or
-                   res_ptr[j - 1 + W] == 255 or res_ptr[j + W] == 255 or res_ptr[j + 1 + W] == 255)
-                    res_ptr[j] = 255;
-            }
-        }
-    }
-    for(int i = H - 2; i >= 1; --i) {
-        uchar* const res_ptr = refined.ptr<uchar>(i);
-        for(int j = 1;j < W - 1; ++j) {
-            if(res_ptr[j] == 128) {
-                if(res_ptr[j - 1] == 255 or res_ptr[j + 1] == 255 or
-                   res_ptr[j - 1 - W] == 255 or res_ptr[j - W] == 255 or res_ptr[j + 1 - W] == 255 or
-                   res_ptr[j - 1 + W] == 255 or res_ptr[j + W] == 255 or res_ptr[j + 1 + W] == 255)
-                    res_ptr[j] = 255;
-            }
-        }
-    }
-    for(int i = H - 2; i >= 1; --i) {
-        uchar* const res_ptr = refined.ptr<uchar>(i);
-        for(int j = W - 2;j >= 1; --j) {
-            if(res_ptr[j] == 128) {
-                if(res_ptr[j - 1] == 255 or res_ptr[j + 1] == 255 or
-                   res_ptr[j - 1 - W] == 255 or res_ptr[j - W] == 255 or res_ptr[j + 1 - W] == 255 or
-                   res_ptr[j - 1 + W] == 255 or res_ptr[j + W] == 255 or res_ptr[j + 1 + W] == 255)
-                    res_ptr[j] = 255;
-                else res_ptr[j] = 0; // 最后一次删除弱边缘
-            }
-        }
-    }
-
-    
-}
-
-
-void Elas::computeCandidate(int16_t * I_du_16,int16_t * I_dv_16,cv::Mat& refined,std::vector<cv::Point>& selected_points)
-{
-  cv::Mat gradients(height, width, CV_64FC1, cv::Scalar(0.0));
-  cv::Mat directions(height, width, CV_64FC1, cv::Scalar(0.0));
-  cv::Mat nms_result(height, width, CV_64FC1, cv::Scalar(0.0));
-  double max=0,min=1000000.;
-  // cv::Mat refined = cv::Mat::zeros(height, width, CV_8UC1);
-  for (int y = 0; y < height; ++y) {
-      for (int x = 0; x < bpl; ++x) {
-            // 获取当前索引位置
-            if(width<=x)continue;
-
-            int index = y * bpl + x;
-            // 相除前确保分母不为0，避免除零错误
-            if (I_dv_16[index] != 0) {
-                // 将相除的结果转换为double并存储在相应位置
-                directions.at<double>(y, x) = static_cast<double>(I_du_16[index]) / I_dv_16[index];
-            } else {
-                // 如果分母为0，可以根据需要赋予一个特定的值，例如0或者最大值
-                directions.at<double>(y, x) = 0; // 或者std::numeric_limits<double>::max();
-            }
-            gradients.at<double>(y, x) =std::sqrt(I_du_16[index] * I_du_16[index] + I_dv_16[index] * I_dv_16[index]);
-            if(gradients.at<double>(y, x)>max)max=gradients.at<double>(y, x);
-            if(gradients.at<double>(y, x)<min)min=gradients.at<double>(y, x);
-        }
-    }
-    
-  non_maximization_suppress(height,width,gradients,directions,nms_result);
-  std::cout<<max<<" "<<min<<std::endl;
-  double low=50,high=100;
-  if(max<300)low=10,high=50;
-  double_threshold_filter(height,width, nms_result,low, high,refined);
-
-   std::vector<cv::Point> non_zero_points;
-    cv::findNonZero(refined, non_zero_points);
-
-    // 随机打乱点列表
-    // 随机数引擎，使用随机设备作为种子
-    std::random_device rnd_device;
-    std::mt19937 mersenne_engine(rnd_device());  // 使用梅森旋转算法
-    std::shuffle(non_zero_points.begin(), non_zero_points.end(), mersenne_engine);
-
-    // 取列表的前20%的点
-    size_t num_selected_points = static_cast<size_t>(non_zero_points.size() );
-    std::cout<<"line segment point"<<num_selected_points<<std::endl;
-    
-    selected_points.insert(selected_points.end(), non_zero_points.begin(), non_zero_points.begin() + num_selected_points);
-    
-  
-}
-
-vector<Elas::support_pt> Elas::computeSupportMatchesLineEnforce (uint8_t* I1_desc,uint8_t* I2_desc,std::vector<cv::Point>& selected_points) //get the desc
-{
-  
-  // be sure that at half resolution we only need data
-  // from every second line!
-  
-  int32_t D_candidate_stepsize = param.candidate_stepsize*2;
-  if (param.subsampling)
-    D_candidate_stepsize += D_candidate_stepsize%2;
-
-  // create matrix for saving disparity candidates
-  int32_t D_can_width  = 0;
-  int32_t D_can_height = 0;
-  for (int32_t u=0; u<width;  u+=D_candidate_stepsize) D_can_width++;
-  for (int32_t v=0; v<height; v+=D_candidate_stepsize) D_can_height++;
-  int16_t* D_can = (int16_t*)calloc(D_can_width*D_can_height,sizeof(int16_t));
-
-  // loop variables
-  int32_t u,v;
-  int16_t d,d2;
-   
-  // for all point candidates in image 1 do
-  for (int32_t u_can=1; u_can<D_can_width; u_can++) {
-    u = u_can*D_candidate_stepsize;
-    for (int32_t v_can=1; v_can<D_can_height; v_can++) {
-      v = v_can*D_candidate_stepsize;
-      
-      // initialize disparity candidate to invalid
-      *(D_can+getAddressOffsetImage(u_can,v_can,D_can_width)) = -1;
-      
-      // find forwards
-      d = computeMatchingDisparity(u,v,I1_desc,I2_desc,false);// use the desc mat to compute the match disparity
-      if (d>=0) {
-        
-        // find backwards
-        d2 = computeMatchingDisparity(u-d,v,I1_desc,I2_desc,true);
-        if (d2>=0 && abs(d-d2)<=param.lr_threshold)
-          *(D_can+getAddressOffsetImage(u_can,v_can,D_can_width)) = d;
-      }
-    }
-  }
-  
-     size_t u_,v_;
-  for(auto & point :selected_points)
-  {
-    u_=static_cast<size_t>(point.x/D_candidate_stepsize);
-    v_=static_cast<size_t>(point.y/D_candidate_stepsize);
-    if(*(D_can+getAddressOffsetImage(u_,v_,D_can_width))>0)
-    {
-      continue;
-    }
-    d = computeMatchingDisparity(point.x,point.y,I1_desc,I2_desc,false);// use the desc mat to compute the match disparity
-    if (d>=0) {
-        
-        // find backwards
-        d2 = computeMatchingDisparity(point.x-d,point.y,I1_desc,I2_desc,true);
-        if (d2>=0 && abs(d-d2)<=param.lr_threshold)
-          *(D_can+getAddressOffsetImage(u_,v_,D_can_width)) = d;
-    }
-  }
-
-  // remove inconsistent support points
-  removeInconsistentSupportPoints(D_can,D_can_width,D_can_height);
-  
-  // remove support points on straight lines, since they are redundant
-  // this reduces the number of triangles a little bit and hence speeds up
-  // the triangulation process
-  removeRedundantSupportPoints(D_can,D_can_width,D_can_height,5,1,true);
-  removeRedundantSupportPoints(D_can,D_can_width,D_can_height,5,1,false);
-  
-  // move support points from image representation into a vector representation
-  vector<support_pt> p_support;
-  for (int32_t u_can=1; u_can<D_can_width; u_can++)
-    for (int32_t v_can=1; v_can<D_can_height; v_can++)
-      if (*(D_can+getAddressOffsetImage(u_can,v_can,D_can_width))>=0)
-        p_support.push_back(support_pt(u_can*D_candidate_stepsize,
-                                       v_can*D_candidate_stepsize,
-                                       *(D_can+getAddressOffsetImage(u_can,v_can,D_can_width))));
-  
-  // if flag is set, add support points in image corners
-  // with the same disparity as the nearest neighbor support point
-  if (param.add_corners)
-    addCornerSupportPoints(p_support);
-
-  // free memory
-  free(D_can);
-  
-
   // return support point vector
   return p_support; 
 }

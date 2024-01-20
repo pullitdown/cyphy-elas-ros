@@ -26,24 +26,17 @@ Street, Fifth Floor, Boston, MA 02110-1301, USA
 using namespace std;
 
 Descriptor::Descriptor(uint8_t* I,int32_t width,int32_t height,int32_t bpl,bool half_resolution) {
-  I_desc        = (uint8_t*)_mm_malloc(16*width*height*sizeof(uint8_t),16);
-  uint8_t* I_du = (uint8_t*)_mm_malloc(bpl*height*sizeof(uint8_t),16);
-  uint8_t* I_dv = (uint8_t*)_mm_malloc(bpl*height*sizeof(uint8_t),16);
-  I_du_16 = (int16_t*)( _mm_malloc( bpl*height*sizeof( int16_t ), 16 ) );
-  I_dv_16 = (int16_t*)( _mm_malloc( bpl*height*sizeof( int16_t ), 16 ) );    
-  filter::sobel3x3(I,I_du,I_dv,bpl,height,I_du_16,I_dv_16);
+  I_desc        = (uint8_t*)_aligned_malloc(16*width*height*sizeof(uint8_t),16);
+  uint8_t* I_du = (uint8_t*)_aligned_malloc(bpl*height*sizeof(uint8_t),16);
+  uint8_t* I_dv = (uint8_t*)_aligned_malloc(bpl*height*sizeof(uint8_t),16);
+  filter::sobel3x3(I,I_du,I_dv,bpl,height);
   createDescriptor(I_du,I_dv,width,height,bpl,half_resolution);
-  _mm_free(I_du);
-  _mm_free(I_dv);
+  _aligned_free(I_du);
+  _aligned_free(I_dv);
 }
 
-
-
 Descriptor::~Descriptor() {
-  _mm_free(I_desc);
-
-  _mm_free( I_du_16 );
-  _mm_free( I_dv_16 );
+  _aligned_free(I_desc);
 }
 
 void Descriptor::createDescriptor (uint8_t* I_du,uint8_t* I_dv,int32_t width,int32_t height,int32_t bpl,bool half_resolution) {
@@ -77,7 +70,6 @@ void Descriptor::createDescriptor (uint8_t* I_du,uint8_t* I_dv,int32_t width,int
         *(I_desc_curr++) = *(I_du+addr_v3+u+0);
         *(I_desc_curr++) = *(I_du+addr_v3+u+2);
         *(I_desc_curr++) = *(I_du+addr_v4+u+0);
-  
         *(I_desc_curr++) = *(I_dv+addr_v1+u+0);
         *(I_desc_curr++) = *(I_dv+addr_v2+u-1);
         *(I_desc_curr++) = *(I_dv+addr_v2+u+1);

@@ -67,10 +67,6 @@ namespace filter {
     // This one works on 16bit input and 8bit output.
     // output is scaled by 1/4, then clamped to [-128,128], and finally shifted to [0,255].
     void convolve_101_row_3x3_16bit( const int16_t* in, uint8_t* out, int w, int h );
-
-    void convolve_121_row_3x3_16bit( const int16_t* in, uint8_t* out, int w, int h ,int16_t* out16);
-
-    void convolve_101_row_3x3_16bit( const int16_t* in, uint8_t* out, int w, int h ,int16_t* out16);
     
     void convolve_cols_5x5( const unsigned char* in, int16_t* out_v, int16_t* out_h, int w, int h );
     
@@ -82,7 +78,7 @@ namespace filter {
   }
   
   void sobel3x3( const uint8_t* in, uint8_t* out_v, uint8_t* out_h, int w, int h );
-  void sobel3x3( const uint8_t* in, uint8_t* out_v, uint8_t* out_h, int w, int h ,int16_t* out_h_16,int16_t* out_v_16);
+  
   void sobel5x5( const uint8_t* in, uint8_t* out_v, uint8_t* out_h, int w, int h );
   
   // -1 -1  0  1  1

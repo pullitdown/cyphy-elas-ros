@@ -93,6 +93,8 @@ public:
 
     local_nh.param<bool>("publish_color_pc", publish_color_pc, 1);
     local_nh.param<bool>("publish_gray_pc", publish_gray_pc, 1);
+    local_nh.param<bool>("publish_segment", publish_segment, 1);
+    local_nh.param<bool>("publish_feature", publish_feature, 1);
 
     // Topics
     //
@@ -121,12 +123,14 @@ public:
 
     image_transport::ImageTransport local_it(local_nh);
 
+    feature_image_pub_.reset(new Publisher(local_it.advertise("feature_image", 1)));
+    mesh_image_pub_.reset(new Publisher(local_it.advertise("mesh_image", 1)));
     disp_pub_.reset(new Publisher(local_it.advertise("image_disparity", 1)));
     depth_pub_.reset(new Publisher(local_it.advertise("depth", 1)));
     pc_pub_.reset(new pcl_ros::Publisher<pcl::PointXYZRGB>(local_nh, "point_cloud", 1));
     pc_pub_gray.reset(new pcl_ros::Publisher<pcl::PointXYZ>(local_nh, "point_cloud_gray", 1));
     elas_fd_pub_.reset(new ros::Publisher(local_nh.advertise<elas_ros::ElasFrameData>("frame_data", 1)));
-
+    segment_pub_.reset(new Publisher(local_it.advertise("segment_image", 1)));
     pub_disparity_ = local_nh.advertise<stereo_msgs::DisparityImage>("disparity", 1);
 
     // Synchronize input topics. Optionally do approximate synchronization.
@@ -352,14 +356,15 @@ public:
 #endif
 
         cv::Vec3b col = cv_ptr->image.at<cv::Vec3b>(left_uv.y , left_uv.x );
+
         cv::Point3d point;
         model.projectDisparityTo3d(left_uv, l_disp_data[index], point);
         point_cloud->points[index].x = point.x;
         point_cloud->points[index].y = point.y;
         point_cloud->points[index].z = point.z;
-        point_cloud->points[index].r = col[0];
+        point_cloud->points[index].b = col[0];
         point_cloud->points[index].g = col[1];
-        point_cloud->points[index].b = col[2];
+        point_cloud->points[index].r = col[2];
       }
 
       pc_pub_->publish(*point_cloud);
@@ -460,23 +465,31 @@ public:
     cv_bridge::CvImageConstPtr l_cv_ptr, r_cv_ptr;
     if (l_image_msg->encoding == sensor_msgs::image_encodings::MONO8)
     {
+      
+      l_cv_ptr = cv_bridge::toCvShare(l_image_msg, sensor_msgs::image_encodings::MONO8);
+      cv::GaussianBlur(l_cv_ptr->image, l_cv_ptr->image, cv::Size(5, 5), 0);
       l_image_data = const_cast<uint8_t *>(&(l_image_msg->data[0]));
       l_step = l_image_msg->step;
     }
     else
     {
       l_cv_ptr = cv_bridge::toCvShare(l_image_msg, sensor_msgs::image_encodings::MONO8);
+      cv::GaussianBlur(l_cv_ptr->image, l_cv_ptr->image, cv::Size(5, 5), 0);
+
       l_image_data = l_cv_ptr->image.data;
       l_step = l_cv_ptr->image.step[0];
     }
     if (r_image_msg->encoding == sensor_msgs::image_encodings::MONO8)
     {
+      r_cv_ptr = cv_bridge::toCvShare(r_image_msg, sensor_msgs::image_encodings::MONO8);
+      cv::GaussianBlur(r_cv_ptr->image, r_cv_ptr->image, cv::Size(5, 5), 0);
       r_image_data = const_cast<uint8_t *>(&(r_image_msg->data[0]));
       r_step = r_image_msg->step;
     }
     else
     {
       r_cv_ptr = cv_bridge::toCvShare(r_image_msg, sensor_msgs::image_encodings::MONO8);
+      cv::GaussianBlur(r_cv_ptr->image, r_cv_ptr->image, cv::Size(5, 5), 0);
       r_image_data = r_cv_ptr->image.data;
       r_step = r_cv_ptr->image.step[0];
     }
@@ -499,8 +512,12 @@ public:
     float *l_disp_data = reinterpret_cast<float *>(&disp_msg->image.data[0]);
     float *r_disp_data = new float[width * height * sizeof(float)];
 
+
+     cv::Mat refined = cv::Mat::zeros(l_image_msg->height, l_image_msg->width, CV_8UC1);
+     cv::Mat feature_img = l_cv_ptr->image.clone();
+
     // Process
-    elas_->process(l_image_data, r_image_data, l_disp_data, r_disp_data, dims);
+     elas_->process(l_image_data, r_image_data, l_disp_data, r_disp_data, dims,refined,feature_img);
 
     // Find the max for scaling the image colour
     float disp_max = 0;
@@ -510,6 +527,27 @@ public:
         disp_max = l_disp_data[i];
       if (r_disp_data[i] > disp_max)
         disp_max = r_disp_data[i];
+    }
+
+    if(publish_feature)
+    {
+      cv_bridge::CvImage out_depth_msg;
+      out_depth_msg.header = l_image_msg->header;
+      out_depth_msg.encoding = sensor_msgs::image_encodings::MONO8;
+      // 修改图像类型为CV_32FC1
+
+      out_depth_msg.image = feature_img;
+      feature_image_pub_->publish(out_depth_msg.toImageMsg());
+    }
+    if(publish_segment)
+    {
+      cv_bridge::CvImage out_depth_msg;
+      out_depth_msg.header = l_image_msg->header;
+      out_depth_msg.encoding = sensor_msgs::image_encodings::MONO8;
+      // 修改图像类型为CV_32FC1
+
+      out_depth_msg.image = refined;
+      segment_pub_->publish(out_depth_msg.toImageMsg());
     }
 
     if (publish_depth)
@@ -544,24 +582,19 @@ public:
       }
       disp_pub_->publish(out_msg.toImageMsg());
     }
-    if (publish_color_pc)
-    {
-      std::vector<int32_t> inliers;
+    std::vector<int32_t> inliers;
       for (int32_t i = 0; i < width * height; i++)
       {
         if (l_disp_data[i] > 0)
           inliers.push_back(i);
       }
+    if (publish_color_pc)
+    {
+      
       publish_point_cloud_with_color(l_image_msg, l_disp_data, inliers, width, height, l_info_msg, r_info_msg);
     }
     if (publish_gray_pc)
     {
-      std::vector<int32_t> inliers;
-      for (int32_t i = 0; i < width * height; i++)
-      {
-        if (l_disp_data[i] > 0)
-          inliers.push_back(i);
-      }
       publish_point_cloud_without_color(l_image_msg, l_disp_data, inliers, width, height, l_info_msg, r_info_msg);
     }
 
@@ -577,6 +610,9 @@ private:
   InfoSubscriber left_info_sub_, right_info_sub_;
   boost::shared_ptr<Publisher> disp_pub_;
   boost::shared_ptr<Publisher> depth_pub_;
+  boost::shared_ptr<Publisher> feature_image_pub_;
+  boost::shared_ptr<Publisher> mesh_image_pub_;
+  boost::shared_ptr<Publisher> segment_pub_;
   boost::shared_ptr<pcl_ros::Publisher<pcl::PointXYZRGB>> pc_pub_;
   boost::shared_ptr<pcl_ros::Publisher<pcl::PointXYZ>> pc_pub_gray;
   boost::shared_ptr<ros::Publisher> elas_fd_pub_;
@@ -614,6 +650,8 @@ private:
   bool publish_disparity;
   bool publish_color_pc;
   bool publish_gray_pc;
+  bool publish_segment;
+  bool publish_feature;
 
   std::string cam_frame;
   image_geometry::PinholeCameraModel left_;

@@ -1,10 +1,6 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(libelas)
+project(libelas_neon)
 set(CMAKE_BUILD_TYPE Release)
-
-# use sse3 instruction set
-add_definitions(-msse3)
-find_package(OpenCV REQUIRED)
 
 find_package(catkin REQUIRED)
 
@@ -14,9 +10,7 @@ catkin_package(
 )
 
 add_library(elas src/descriptor.cpp src/elas.cpp src/filter.cpp src/matrix.cpp src/triangle.cpp)
-target_link_libraries(elas ${OpenCV_LIBRARIES})
-include_directories(include include/libelas ${catkin_INCLUDE_DIRS} ${libelas_INCLUDE_DIRS})
-target_compile_options(elas PRIVATE -g)
+include_directories(include include/libelas ${catkin_INCLUDE_DIRS})
 
 install(
   TARGETS elas

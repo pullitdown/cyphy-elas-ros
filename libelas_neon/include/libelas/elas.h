@@ -30,7 +30,6 @@ Street, Fifth Floor, Boston, MA 02110-1301, USA
 #include <stdlib.h>
 #include <vector>
 #include <emmintrin.h>
-#include <opencv2/opencv.hpp>
 
 // define fixed-width datatypes for Visual Studio projects
 #ifndef _MSC_VER
@@ -46,8 +45,6 @@ Street, Fifth Floor, Boston, MA 02110-1301, USA
   typedef unsigned __int64  uint64_t;
 #endif
 
-
-#define line_enforce
 #ifdef PROFILE
 #include "timer.h"
 #endif
@@ -163,7 +160,7 @@ public:
   //               if subsampling is not active their size is width x height,
   //               otherwise width/2 x height/2 (rounded towards zero)
   void process (uint8_t* I1,uint8_t* I2,float* D1,float* D2,const int32_t* dims);
-  void process (uint8_t* I1_,uint8_t* I2_,float* D1,float* D2,const int32_t* dims,cv::Mat& refined,cv::Mat& feature_img);
+  
 private:
   
   struct support_pt {
@@ -195,8 +192,6 @@ private:
   void addCornerSupportPoints (std::vector<support_pt> &p_support);
   inline int16_t computeMatchingDisparity (const int32_t &u,const int32_t &v,uint8_t* I1_desc,uint8_t* I2_desc,const bool &right_image);
   std::vector<support_pt> computeSupportMatches (uint8_t* I1_desc,uint8_t* I2_desc);
-  std::vector<support_pt> computeSupportMatchesLineEnforce (uint8_t* I1_desc,uint8_t* I2_desc,std::vector<cv::Point>& selected_points); //get the desc
-void computeCandidate(int16_t * I_du_16,int16_t * I_dv_16,cv::Mat& refined,std::vector<cv::Point>& selected_points);
 
   // triangulation & grid
   std::vector<triangle> computeDelaunayTriangulation (std::vector<support_pt> p_support,int32_t right_image);
@@ -204,10 +199,6 @@ void computeCandidate(int16_t * I_du_16,int16_t * I_dv_16,cv::Mat& refined,std::
   void createGrid (std::vector<support_pt> p_support,int32_t* disparity_grid,int32_t* grid_dims,bool right_image);
 
   // matching
-
-  void computeCandidate(int16_t * I_du_16,int16_t * I_dv_16);
-
-
   inline void updatePosteriorMinimum (__m128i* I2_block_addr,const int32_t &d,const int32_t &w,
                                       const __m128i &xmm1,__m128i &xmm2,int32_t &val,int32_t &min_val,int32_t &min_d);
   inline void updatePosteriorMinimum (__m128i* I2_block_addr,const int32_t &d,

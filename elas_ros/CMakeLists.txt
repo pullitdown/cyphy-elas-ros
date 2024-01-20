@@ -58,7 +58,7 @@ add_dependencies(pc_construction ${PROJECT_NAME}_gencpp)
 
 target_link_libraries(elas_ros ${OpenCV_LIBRARIES} ${Boost_LIBRARIES} ${catkin_LIBRARIES})
 target_link_libraries(pc_construction ${OpenCV_LIBRARIES} ${Boost_LIBRARIES} ${catkin_LIBRARIES})
-
+target_compile_options(elas_ros PRIVATE -g)
 
 install(TARGETS elas_ros
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})

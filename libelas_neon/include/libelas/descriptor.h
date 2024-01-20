@@ -53,15 +53,12 @@ public:
   // constructor creates filters
   Descriptor(uint8_t* I,int32_t width,int32_t height,int32_t bpl,bool half_resolution);
   
-  // Descriptor(uint8_t* I, uint8_t* I_du,uint8_t *I_dv, int32_t width,int32_t height,int32_t bpl,bool half_resolution);
-
   // deconstructor releases memory
   ~Descriptor();
   
   // descriptors accessible from outside
   uint8_t* I_desc;
-  int16_t* I_dv_16;
-  int16_t* I_du_16;
+  
 private:
 
   // build descriptor I_desc from I_du and I_dv
